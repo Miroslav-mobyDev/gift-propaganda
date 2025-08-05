@@ -29,30 +29,37 @@ def init_db():
     logger.info(f"TOKEN: {'SET' if token else 'NOT SET'}")
     logger.info(f"WEBHOOK_URL: {webhook_url}")
 
-    max_attempts = 10
+    max_attempts = 15  # Увеличиваем количество попыток
     for attempt in range(1, max_attempts + 1):
         try:
             # Пересоздаем движок с обновленными метаданными
             global engine, SessionLocal
             engine = recreate_engine()
             
-            # Проверяем подключение
-            with engine.connect() as connection:
+            # Тестируем подключение
+            if test_connection():
                 logger.info("Успешное подключение к базе данных")
-
-            # Создаем таблицы
-            create_tables()
-
-            logger.info("База данных инициализирована успешно")
-            return
+                
+                # Создаем таблицы
+                create_tables()
+                
+                logger.info("База данных инициализирована успешно")
+                return
+            else:
+                raise Exception("Тест подключения не прошел")
 
         except Exception as e:
             logger.warning(f"Попытка {attempt}/{max_attempts} подключения к базе: {e}")
             if attempt < max_attempts:
-                time.sleep(5)
+                # Увеличиваем время ожидания с каждой попыткой
+                wait_time = min(5 * attempt, 30)
+                logger.info(f"Ожидание {wait_time} секунд перед следующей попыткой...")
+                time.sleep(wait_time)
             continue
 
-    raise Exception("Не удалось подключиться к базе данных после нескольких попыток")
+    logger.error("Не удалось подключиться к базе данных после нескольких попыток")
+    # Не прерываем запуск приложения, позволяем ему работать без БД
+    logger.warning("Приложение запускается без подключения к базе данных")
 
 def apply_migrations():
     """Применяет миграции базы данных"""
@@ -110,13 +117,19 @@ def apply_migrations():
 async def lifespan(app: FastAPI):
     logger.info("Запуск приложения...")
 
-    # Инициализация базы данных
-    init_db()
+    # Инициализация базы данных (не прерываем запуск при ошибках)
+    try:
+        init_db()
+    except Exception as e:
+        logger.error(f"Ошибка инициализации БД: {e}")
 
-    # Применение миграций
-    apply_migrations()
+    # Применение миграций (не прерываем запуск при ошибках)
+    try:
+        apply_migrations()
+    except Exception as e:
+        logger.error(f"Ошибка применения миграций: {e}")
 
-    # Настройка webhook
+    # Настройка webhook (не прерываем запуск при ошибках)
     try:
         import requests
         webhook_response = requests.post(
@@ -131,18 +144,21 @@ async def lifespan(app: FastAPI):
         logger.error(f"Ошибка при установке webhook: {e}")
 
     # Запуск периодических задач
-    news_service = TelegramNewsService()
+    try:
+        news_service = TelegramNewsService()
 
-    async def periodic_update():
-        while True:
-            try:
-                await news_service.update_news_async()
-                logger.info("Периодическое обновление завершено")
-            except Exception as e:
-                logger.error(f"Ошибка при обновлении новостей: {e}")
-            await asyncio.sleep(300)  # обновляем каждые 5 минут
+        async def periodic_update():
+            while True:
+                try:
+                    await news_service.update_news_async()
+                    logger.info("Периодическое обновление завершено")
+                except Exception as e:
+                    logger.error(f"Ошибка при обновлении новостей: {e}")
+                await asyncio.sleep(300)  # обновляем каждые 5 минут
 
-    asyncio.create_task(periodic_update())
+        asyncio.create_task(periodic_update())
+    except Exception as e:
+        logger.error(f"Ошибка при запуске периодических задач: {e}")
 
     yield
 
@@ -179,12 +195,48 @@ async def root():
 
 @app.get("/health")
 async def health():
+    """Проверка состояния приложения"""
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "database": "unknown",
+        "webhook": "unknown"
+    }
+    
+    # Проверяем подключение к БД
     try:
-        # Проверяем подключение к БД
-        with engine.connect() as connection:
-            return {"status": "healthy", "database": "connected"}
+        if test_connection():
+            health_status["database"] = "connected"
+        else:
+            health_status["database"] = "disconnected"
     except Exception as e:
-        return {"status": "unhealthy", "error": str(e)}
+        health_status["database"] = f"error: {str(e)}"
+    
+    # Проверяем webhook
+    try:
+        import requests
+        webhook_response = requests.get(
+            f"https://api.telegram.org/bot{TOKEN}/getWebhookInfo",
+            timeout=5
+        )
+        if webhook_response.status_code == 200:
+            webhook_data = webhook_response.json()
+            if webhook_data.get("ok") and webhook_data.get("result", {}).get("url"):
+                health_status["webhook"] = "configured"
+            else:
+                health_status["webhook"] = "not_configured"
+        else:
+            health_status["webhook"] = "error"
+    except Exception as e:
+        health_status["webhook"] = f"error: {str(e)}"
+    
+    # Определяем общий статус
+    if health_status["database"] == "connected":
+        health_status["status"] = "healthy"
+    else:
+        health_status["status"] = "degraded"
+    
+    return health_status
 
 if __name__ == "__main__":
     import uvicorn

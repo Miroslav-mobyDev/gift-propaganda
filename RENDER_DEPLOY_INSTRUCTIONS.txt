@@ -1,0 +1,40 @@
+
+🚀 ИНСТРУКЦИИ ПО ДЕПЛОЮ НА RENDER
+
+1. 📋 ПОДГОТОВКА
+   - Убедитесь, что код закоммичен в GitHub
+   - Проверьте, что все файлы на месте
+
+2. 🌐 СОЗДАНИЕ СЕРВИСА НА RENDER
+   - Перейдите на https://render.com
+   - Нажмите "New +" → "Web Service"
+   - Подключите ваш GitHub репозиторий
+
+3. ⚙️ НАСТРОЙКА СЕРВИСА
+   - Name: giftpropaganda-api
+   - Environment: Python
+   - Build Command: pip install -r requirements.txt
+   - Start Command: uvicorn server.main:app --host 0.0.0.0 --port $PORT
+
+4. 🔧 ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ
+   Добавьте в Render Dashboard:
+   - TOKEN=your_telegram_bot_token
+   - WEBHOOK_URL=https://your-app-name.onrender.com/webhook
+   - DATABASE_URL=postgresql://... (создается автоматически)
+
+5. 🗄️ СОЗДАНИЕ БАЗЫ ДАННЫХ
+   - Нажмите "New +" → "PostgreSQL"
+   - Name: giftpropaganda-db
+   - Подключите к вашему web сервису
+
+6. 🚀 ДЕПЛОЙ
+   - Нажмите "Create Web Service"
+   - Дождитесь завершения сборки
+
+7. 🔗 НАСТРОЙКА WEBHOOK
+   После деплоя обновите webhook:
+   https://api.telegram.org/bot{YOUR_TOKEN}/setWebhook?url=https://your-app-name.onrender.com/webhook
+
+8. ✅ ПРОВЕРКА
+   - Проверьте логи в Render Dashboard
+   - Тестируйте API: https://your-app-name.onrender.com/health

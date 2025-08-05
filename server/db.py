@@ -5,28 +5,52 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker, Session, relationship
 from datetime import datetime
 import os
+import logging
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Получаем URL базы данных из переменных окружения
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./news.db")
 
+# Функция для создания движка с правильными настройками
+def create_database_engine():
+    """Создает движок базы данных с оптимальными настройками для Render"""
+    if DATABASE_URL.startswith("sqlite"):
+        # Для SQLite
+        return create_engine(
+            DATABASE_URL,
+            echo=False,
+            connect_args={"check_same_thread": False}
+        )
+    else:
+        # Для PostgreSQL на Render
+        # Обрабатываем URL для Render (может содержать ?sslmode=require)
+        if "?" in DATABASE_URL:
+            base_url = DATABASE_URL.split("?")[0]
+        else:
+            base_url = DATABASE_URL
+        
+        return create_engine(
+            base_url,
+            echo=False,
+            # Настройки пула соединений для Render
+            pool_size=5,
+            max_overflow=10,
+            pool_pre_ping=True,
+            pool_recycle=300,
+            pool_reset_on_return='commit',
+            # Настройки SSL для Render
+            connect_args={
+                "sslmode": "require",
+                "connect_timeout": 30,
+                "application_name": "giftpropaganda-api"
+            }
+        )
+
 # Создаем движок базы данных
-if DATABASE_URL.startswith("sqlite"):
-    # Для SQLite
-    engine = create_engine(
-        DATABASE_URL,
-        echo=False,
-        connect_args={"check_same_thread": False}
-    )
-else:
-    # Для PostgreSQL
-    engine = create_engine(
-        DATABASE_URL,
-        connect_args={"sslmode": "require"},
-        echo=False,
-        pool_pre_ping=True,
-        pool_recycle=300,
-        pool_reset_on_return='commit'
-    )
+engine = create_database_engine()
 
 # Сессии
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -66,61 +90,78 @@ class NewsItem(Base):
     source = relationship("NewsSource")  # Для удобного доступа
 
 def get_db() -> Session:
+    """Получает сессию базы данных с обработкой ошибок"""
     db = SessionLocal()
     try:
-        # Принудительно обновляем метаданные при каждом запросе
+        # Проверяем соединение
         db.execute(text("SELECT 1"))
         yield db
+    except Exception as e:
+        logger.error(f"Ошибка подключения к базе данных: {e}")
+        db.rollback()
+        raise
     finally:
         db.close()
 
 
 def create_tables():
-    Base.metadata.create_all(bind=engine)
+    """Создает таблицы с обработкой ошибок"""
+    try:
+        Base.metadata.create_all(bind=engine)
+        logger.info("Таблицы созданы успешно")
+    except Exception as e:
+        logger.error(f"Ошибка при создании таблиц: {e}")
+        raise
 
 
 def get_db_session():
+    """Получает сессию базы данных"""
     return SessionLocal()
+
+def test_connection():
+    """Тестирует подключение к базе данных"""
+    try:
+        with engine.connect() as connection:
+            result = connection.execute(text("SELECT 1"))
+            logger.info("Подключение к базе данных успешно")
+            return True
+    except Exception as e:
+        logger.error(f"Ошибка подключения к базе данных: {e}")
+        return False
 
 def refresh_metadata():
     """Принудительно обновляет метаданные SQLAlchemy"""
-    Base.metadata.reflect(bind=engine)
-    print("Метаданные SQLAlchemy обновлены")
-
-# Принудительно обновляем метаданные при импорте
-try:
-    refresh_metadata()
-except Exception as e:
-    print(f"Ошибка при обновлении метаданных: {e}")
+    try:
+        Base.metadata.reflect(bind=engine)
+        logger.info("Метаданные SQLAlchemy обновлены")
+    except Exception as e:
+        logger.error(f"Ошибка при обновлении метаданных: {e}")
 
 # Пересоздаем движок с обновленными метаданными
 def recreate_engine():
     """Пересоздает движок базы данных с обновленными метаданными"""
     global engine, SessionLocal
-    if DATABASE_URL.startswith("sqlite"):
-        # Для SQLite
-        engine = create_engine(
-            DATABASE_URL,
-            echo=False,
-            connect_args={"check_same_thread": False}
-        )
-    else:
-        # Для PostgreSQL
-        engine = create_engine(
-            DATABASE_URL,
-            connect_args={"sslmode": "require"},
-            echo=False,
-            pool_pre_ping=True,
-            pool_recycle=300,
-            pool_reset_on_return='commit'
-        )
+    engine = create_database_engine()
     SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-    refresh_metadata()
+    try:
+        refresh_metadata()
+    except Exception as e:
+        logger.warning(f"Не удалось обновить метаданные: {e}")
     return engine
 
 # Пересоздаем модель с обновленными метаданными
 def recreate_models():
     """Пересоздает модели с обновленными метаданными"""
     global NewsItem, NewsSource
-    Base.metadata.reflect(bind=engine)
-    return NewsItem, NewsSource
+    try:
+        Base.metadata.reflect(bind=engine)
+        return NewsItem, NewsSource
+    except Exception as e:
+        logger.error(f"Ошибка при пересоздании моделей: {e}")
+        return NewsItem, NewsSource
+
+# Инициализация при импорте
+try:
+    refresh_metadata()
+except Exception as e:
+    logger.warning(f"Ошибка при инициализации метаданных: {e}")
