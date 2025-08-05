@@ -3,11 +3,9 @@ uvicorn[standard]==0.22.0
 sqlalchemy==2.0.15
 python-dotenv==1.0.0
 requests==2.31.0
-apscheduler==3.10.4
-aiohttp==3.8.5
-feedparser==6.0.10
-pydantic==1.10.8
 psycopg2-binary==2.9.6
+pydantic==1.10.8
+feedparser==6.0.10
 beautifulsoup4==4.12.2
 python-multipart==0.0.6
 

@@ -1,4 +1,4 @@
-import aiohttp
+import requests
 import asyncio
 import feedparser
 from typing import List, Dict, Any, Optional
@@ -103,21 +103,20 @@ class TelegramNewsService:
             # Используем публичный API Telegram для получения постов
             url = f"https://t.me/s/{channel_username}"
 
-            async with aiohttp.ClientSession() as session:
-                try:
-                    async with session.get(url, timeout=10) as response:
-                        if response.status == 200:
-                            html_content = await response.text()
-                            return self._parse_telegram_html(html_content, channel_data)
-                        else:
-                            logger.warning(f"Failed to fetch {url}, status: {response.status}")
-                            return self._generate_mock_posts(channel_data)
-                except aiohttp.ClientTimeout:
-                    logger.warning(f"Timeout fetching {url}, using mock data")
+            try:
+                response = requests.get(url, timeout=10)
+                if response.status_code == 200:
+                    html_content = response.text
+                    return self._parse_telegram_html(html_content, channel_data)
+                else:
+                    logger.warning(f"Failed to fetch {url}, status: {response.status_code}")
                     return self._generate_mock_posts(channel_data)
-                except Exception as e:
-                    logger.warning(f"Error fetching {url}: {e}, using mock data")
-                    return self._generate_mock_posts(channel_data)
+            except requests.Timeout:
+                logger.warning(f"Timeout fetching {url}, using mock data")
+                return self._generate_mock_posts(channel_data)
+            except Exception as e:
+                logger.warning(f"Error fetching {url}: {e}, using mock data")
+                return self._generate_mock_posts(channel_data)
 
         except Exception as e:
             logger.error(f"Error in fetch_telegram_channel for {channel_username}: {e}")
@@ -738,13 +737,12 @@ class TelegramNewsService:
     async def fetch_rss_source(self, url: str, name: str, category: str) -> List[Dict[str, Any]]:
         """Получение новостей из RSS источника"""
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10) as response:
-                    if response.status != 200:
-                        logger.warning(f"Failed to fetch RSS {url}, status: {response.status}")
-                        return []
+            response = requests.get(url, timeout=10)
+            if response.status_code != 200:
+                logger.warning(f"Failed to fetch RSS {url}, status: {response.status_code}")
+                return []
 
-                    content = await response.text()
+            content = response.text
                     feed = feedparser.parse(content)
 
                     if not feed.entries:
