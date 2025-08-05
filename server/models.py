@@ -18,8 +18,7 @@ class NewsSourceResponse(BaseModel):
     category: Optional[str] = None
     is_active: bool
 
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 class NewsItemResponse(BaseModel):
     id: int
@@ -37,8 +36,7 @@ class NewsItemResponse(BaseModel):
     source_url: Optional[str] = None   # И это
     source: Optional[NewsSourceResponse] = None  # Полная информация об источнике
     
-    class Config:
-        from_attributes = True
+    model_config = {"from_attributes": True}
 
 
 class NewsResponse(BaseModel):
